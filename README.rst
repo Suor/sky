@@ -27,24 +27,24 @@ Example
 
 Javascripts for-in loop has a well-known flaw - it can iterate by ad-hoc inherited properties.
 The usual solution is wrapping loop body with ``obj.hasOwnProperty(key)`` which is annoying.
-How cool would be able to write something like:
+How cool would be writing it like::
 
-| **for** (**own** key **in** obj) {
-|     *// do something with own properties of obj*
-| }
+    for (own key in obj) {
+        // do something with own properties of obj
+    }
 
-And you can do it in sky, by just adding a rule like:
+And you can do it in sky, by just adding a rule like::
 
-| **rule** ~ **for** (**own** *<key:ident>* **in** *<object:expr>*) *<code-block>* ~ {
-|    **var** temp = uniq_ident();
-|    **return** ~
-|        **var** *<temp>* = *<object>*;
-|        **for** (*<key>* **in** *<temp>*) {
-|            **if** (*<temp>*.hasOwnProperty(*<key>*))
-|                *<code-block>*
-|        }
-|    ~;
-| }
+    rule ~ for (own <key:ident> in <object:expr>) <code-block> ~ {
+        var temp = uniq_ident();
+        return ~
+            var <temp> = <object>;
+            for (<key> in <temp>) {
+                if (<temp>.hasOwnProperty(<key>))
+                    <code-block>
+            }
+        ~;
+    }
 
 Rules can help fix language flaws, avoid design pattern copy-paste, make DSLs. You can even morph one language into another and use them together.
 
