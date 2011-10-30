@@ -1,0 +1,78 @@
+regex rule-literal-term ~[^@]\S*~;
+
+regex rule-quoted-literal ~\\(.)~;
+
+regex rule-control-term ~@\S*~;
+
+rule rule-ref ~ \< <name:ident> \: <rule:ident> \> ~;
+
+rule rule-term maybe rule-literal-term, rule-control-term, rule-ref;
+
+regex ~~~ regex \s+ <name:ident> \s* ~<re:.*?>~ ~~~ {
+    get_rule(name).push({terms: [{re: re}]});
+}
+
+rule ~~~ rule <name:ident>@? ~ <terms:rule-term>@+ ~ ; ~~~ {
+    get_rule(name).push({terms: terms});
+}
+
+rule ~~~ rule <name:ident>@? maybe <defs:ident> @( , <defs:ident> @) @* ; ~~~ {
+    var rule = get_rule(name);
+    defs.forEach(function (def) {
+        rule.push({terms: [def]});
+    });
+}
+
+rule ~~~ rule <name:ident>@? ~ <terms:rule-expr>@+ ~ { <code> } ~~~ {
+    get_rule(name).push({terms: terms, code: code});
+}
+
+rule rule-cond-expr ~ <expr:rule-expr> \@? ~ {
+    var cond_expr = Object.create(expr);
+    cond_expr.repeat = {from: 0, to: 1};
+    return cond_expr;
+}
+
+rule rule-star-expr ~ <expr:rule-expr> \@* ~ {
+    var cond_expr = Object.create(expr);
+    cond_expr.repeat = {from: 0, to: Infinity};
+    return cond_expr;
+}
+
+rule rule-plus-expr ~ <expr:rule-expr> \@+ ~ {
+    var cond_expr = Object.create(expr);
+    cond_expr.repeat = {from: 1, to: Infinity};
+    return cond_expr;
+}
+
+rule rule-parenthesied-expr ~ \@( <expr:rule-expr> \@) ~ {
+    return expr;
+}
+
+rule rule-expr maybe rule-literal-term, rule-cond-term, rule-star-term, rule-plus-term, rule-parenthesied-expr;
+
+rule code ~ <statement>@+ ~;
+
+rule statement maybe assign, print;
+
+regex digit ~[0123456789]~;
+
+regex non-zero-digit ~[123456789]~;
+
+regex int-literal ~ <non-zero-digit> <digit>+ ~;
+
+regex ident ~ [a-zA-Z] [a-zA-Z0-9-]* ~;
+
+rule add-expression ~ <left:expression> + <right:expression> ~ {
+    return ~ (<left>) + (<right>) ~;
+}
+
+rule expression maybe int-literal, ident, add-expression;
+
+rule assign ~ <left:ident> = <expression> ; ~ {
+    return ~ <left> = <expression>; ~
+}
+
+rule print ~ print <expression> ; ~ {
+    return ~ console.log(<expression>); ~
+}

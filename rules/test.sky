@@ -1,0 +1,26 @@
+
+regex int-literal ~ 0 | [1-9][0-9]+ ~;
+
+regex ident ~ [a-zA-Z][a-zA-Z0-9-]* ~;
+
+rule add-expr ~ <left:expr> + <right:expr> ~ {
+    return ~ (<left>) + (<right>) ~;
+}
+
+rule expr maybe int-literal, ident, add-expr;
+
+rule assign ~ <left:ident> = <right:expr> ; ~ {
+    return ~ <left> = <right>; ~
+}
+
+rule print ~ print <expr:expr> ; ~ {
+    return ~ console.log(<expr>); ~
+}
+
+rule statement maybe assign, print;
+
+rule code ~ <statement>@+ ~;
+
+rule return ~ return <expr:expr> ; ~ {
+    return ~ return <expr>; ~
+}
