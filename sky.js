@@ -21,6 +21,15 @@ var sky = {
             }
         }
     },
+    map: function (obj, func) {
+        var result = [];
+        for (var p in obj) {
+            if (obj.hasOwnProperty(p)) {
+                result.push(func(obj[p], p));
+            }
+        }
+        return result;
+    },
     flat: function (list) {
         var result = [], chunk;
         for (var i = 0; i < list.length; i++) {
@@ -36,6 +45,13 @@ var sky = {
     flat_map: function (list, func) {
         return sky.flat(list.map(func));
     },
+    list_to_hash: function (list) {
+        var hash = {};
+        for (var i = 0; i < list.length; i++) {
+            hash[list[i]] = true;
+        }
+        return hash;
+    },
     child: function (obj, props) {
         var child = Object.create(obj);
         sky.each(props, function (value, prop) {
@@ -43,6 +59,34 @@ var sky = {
         });
         return child;
     },
+    inspect: function (obj) {
+        var result = {};
+        for (var p in obj) {
+            result[p] = obj[p];
+        }
+        return result;
+    },
+    send: function (message) {
+        return function (obj) {
+            return obj[message]();
+        }
+    },
+
+    rules: [],
+    rules_by_name: {},
+    define_rule: function (matches) {
+        this.rules.push(matches);
+        if (!this.rules_by_name[matches.name]) {
+            this.rules_by_name[matches.name] = [];
+        }
+        this.rules_by_name[matches.name].push(matches);
+    },
+    define_rules: function () {
+        [].forEach.call(arguments, function (rule) {
+            sky.define_rule(rule);
+        });
+    },
+
     _start_rules_of: {},
     start_rules_of: function (parent_rule_name) {
         var starts = {}, count;
@@ -51,18 +95,18 @@ var sky = {
         if (!this._start_rules_of[parent_rule_name]) {
             do {
                 count = Object.keys(starts).length;
-                sky.rules.forEach(function (rule) {
-                    if (rule.name in starts && rule.terms[0].rule) {
+                this.rules.forEach(function (rule) {
+                    if (starts[rule.name] && rule.terms[0].rule) {
                         starts[rule.terms[0].rule] = true;
                     }
-                });
+                })
             } while (count != Object.keys(starts).length);
             this._start_rules_of[parent_rule_name] = starts;
         }
         return this._start_rules_of[parent_rule_name];
     }
 };
-sky.rules = [
+sky.define_rules(
     {name: "ident", terms: [/^[a-zA-Z][a-zA-Z0-9-]*/]},
 
     {name: "rule-literal-term", terms: [/^[^@]\S*|\\(.)/]},
@@ -88,34 +132,50 @@ sky.rules = [
     {name: "rule-star-expr", terms: [{name: "expr", rule: "rule-expr"}, "@*"],
      expand: function (matches) { return sky.child(matches.expr, {repeat: {from: 0, to: Infinity}, collect: "array"}) }},
     {name: "rule-plus-expr", terms: [{name: "expr", rule: "rule-expr"}, "@+"],
-     expand: function (matches) { return sky.child(matches.expr, {repeat: {from: 1, to: Infinity}, collect: "array"}) }},
-];
+     expand: function (matches) { return sky.child(matches.expr, {repeat: {from: 1, to: Infinity}, collect: "array"}) }}
+);
 "rule-literal-term rule-ref rule-cond-expr rule-star-expr rule-plus-expr".split(" ").forEach(function (rule) {
-    sky.rules.push({name: "rule-expr", terms: [{rule: rule}]});
+    sky.define_rules({name: "rule-expr", terms: [{rule: rule}]});
 });
-sky.rules.push({
+sky.define_rules({
     name: "rule-def",
     terms: ["rule", {name: "name", rule: "ident", repeat: {from: 0, to: 1}},
             "~", {name: "terms", rule: "rule-expr", repeat: {from: 1, to: Infinity}, collect: "array"}, "~",
             "{", {name: "code", rule: "code"}, "}"],
     expand: function (matches) { sky.rules.push(matches); }
 });
-sky.rules = sky.rules.concat([
+sky.define_rules(
     {name: "int-literal", terms: [/^0|^[1-9][0-9]*/]},
     {name: "add-expr", terms: [{name: "left", rule: "expr"}, "+", {name: "right", rule: "expr"}],
      expand: function (matches) {
         return "(" + matches.left + " + " + matches.right + ")";
+    }},
+    {name: "mul-expr", terms: [{name: "left", rule: "expr"}, "*", {name: "right", rule: "expr"}],
+     expand: function (matches) {
+        return "(" + matches.left + " * " + matches.right + ")";
     }}
-]);
-"int-literal ident add-expr".split(" ").forEach(function (rule) {
-    sky.rules.push({name: "expr", terms: [{rule: rule}]});
+);
+"int-literal ident add-expr mul-expr".split(" ").forEach(function (rule) {
+    sky.define_rules({name: "expr", terms: [{rule: rule}]});
 });
-sky.rules.push(sky.base_rule = {
+sky.define_rules(sky.base_rule = {
     name: "statement", terms: [{name: "expr", rule: "expr"}, ";"],
     expand: function (matches) { return matches.expr + ";"; }
 });
 
-sky.assoc = {"add-expr": "left"};
+sky.assoc = {"add-expr": "left", "mul-expr": "left"};
+sky.priority = {"add-expr": 1, "mul-expr": 2};
+
+sky.tighter = function (rule) {
+    return Object.keys(sky.priority).filter(function (x) {
+        return sky.priority[x] > sky.priority[rule];
+    });
+};
+sky.looser = function (rule) {
+    return Object.keys(sky.priority).filter(function (x) {
+        return sky.priority[x] < sky.priority[rule];
+    });
+};
 
 
 function RuleState(rule) {
@@ -125,6 +185,9 @@ function RuleState(rule) {
         matched: []
     });
 }
+
+
+// TODO: rename rules to folds where appropriate
 
 RuleState.prototype = {
     toString: function () {
@@ -147,7 +210,33 @@ RuleState.prototype = {
         child.pos += 1;
         child.matched.push(term)
         return child;
-    }
+    },
+
+    assoc: function () {
+        return sky.assoc[this.assoc_rule()];
+    },
+    assoc_rule: function () {
+        if (sky.assoc[this.rule.name]) {
+            return this.rule.name;
+        } else if (this.rule.terms.length === 1 && this.rule.terms[0].rule) {
+            return this.matched[0].assoc_rule()
+        } else {
+            return null;
+        }
+    },
+
+    priority: function () {
+        return sky.priority[this.priority_rule()];
+    },
+    priority_rule: function () {
+        if (sky.priority[this.rule.name]) {
+            return this.rule.name;
+        } else if (this.rule.terms.length === 1 && this.rule.terms[0].rule) {
+            return this.matched[0].priority_rule()
+        } else {
+            return null;
+        }
+    },
 };
 
 
@@ -176,7 +265,6 @@ State.prototype = {
     child: function () {
         var child = Object.create(this);
         child.parts = [].concat(this.parts);
-        //this.rule_states.map(function (rule_state) { return rule_state.child() });
         child.full = [].concat(this.full);
         return child;
     },
@@ -218,12 +306,37 @@ State.prototype = {
         var expected_rule_names = sky.child(sky.start_rules_of(next_term_rule));
 
         if (last_partial
-            && last_partial.pos === last_partial.rule.terms.length - 1
-            && sky.assoc[last_partial.rule.name] === "left") {
+                && last_partial.pos === last_partial.rule.terms.length - 1
+                && sky.assoc[last_partial.rule.name] === "left")
+        {
             expected_rule_names[last_partial.rule.name] = false;
         }
-        if (folded && sky.assoc[folded.rule.name] === "right") {
-            expected_rule_names[folded.rule.name] = false;
+
+        if (last_partial
+            && last_partial.pos === last_partial.rule.terms.length - 1
+            && last_partial.priority())
+        {
+            var looser = sky.looser(last_partial.priority_rule());
+/*            console.log('--priority', this.toString());
+            console.log(last_partial.toString(), looser);*/
+            looser.forEach(function (rule_name) {
+                expected_rule_names[rule_name] = false;
+            });
+/*            console.log(sky.inspect(expected_rule_names));*/
+        }
+
+        if (folded && folded.assoc() === "right") {
+            expected_rule_names[folded.assoc_rule()] = false;
+        }
+
+        if (folded && folded.priority()) {
+            var tighter = sky.tighter(folded.priority_rule());
+/*            console.log('--priority', this.toString());
+            console.log(folded.toString(), tighter);*/
+            tighter.forEach(function (rule_name) {
+                expected_rule_names[rule_name] = false;
+            });
+/*            console.log(sky.inspect(expected_rule_names));*/
         }
 
         return sky.rules.filter(function (rule) { return expected_rule_names[rule.name] });
@@ -239,10 +352,12 @@ State.prototype = {
             moved.push(with_full);
         }
 
+/*        console.log(this.toString(), folded.toString());*/
         var start = sky.flat_map(this.expected_rules(folded), function (rule) {
             var term = rule.terms[0];
             if (term.rule && term.rule === folded.rule.name) {
                 var partial = RuleState(rule);
+/*                console.log('fold', folded.toString(), 'into', partial.toString());*/
                 return state.moved_by_partial(partial.moved(folded));
             }
         });
@@ -305,7 +420,7 @@ State.prototype = {
         }
     },
 
-    advanced: function () {
+    moved: function () {
         var state = this;
         state.eat_space();
 
@@ -324,31 +439,19 @@ State.prototype = {
     },
 }
 
+var send = {};
+['toString', 'moved'].forEach(function (message) {
+    send[message] = sky.send(message);
+});
+
 function morph(text) {
-    var state = State(text);
+    var states = [State(text)];
 
-    var advanced = state.advanced();
-    out(advanced.map(function (state) {return state.toString()}));
-
-    console.log("");
-    advanced = sky.flat_map(advanced, function (state) { return state.advanced() });
-    out(advanced.map(function (state) {return state.toString()}));
-
-    console.log("");
-    advanced = sky.flat_map(advanced, function (state) { return state.advanced() });
-    out(advanced.map(function (state) {return state.toString()}));
-
-    console.log("");
-    advanced = sky.flat_map(advanced, function (state) { return state.advanced() });
-    out(advanced.map(function (state) {return state.toString()}));
-
-    console.log("");
-    advanced = sky.flat_map(advanced, function (state) { return state.advanced() });
-    out(advanced.map(function (state) {return state.toString()}));
-
-    console.log("");
-    advanced = sky.flat_map(advanced, function (state) { return state.advanced() });
-    out(advanced.map(function (state) {return state.toString()}));
+    while (states.length) {
+        console.log("");
+        states = sky.flat_map(states, send.moved);
+        out(states.map(send.toString));
+    }
 }
 
-morph('1+2+3;');
+morph('A + X * Y + B;');

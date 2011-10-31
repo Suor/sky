@@ -18,8 +18,9 @@ Why Javascript?
 
 - it's high level
 - it's popular
-- it has good implenetation
+- it has good implementation
 - it has obvious language flaws
+- I like it
 
 
 Example
@@ -46,7 +47,8 @@ And you can do it in sky, by just adding a rule like::
         ~;
     }
 
-Rules can help fix language flaws, avoid design pattern copy-paste, make DSLs. You can even morph one language into another and use them together.
+Rules can help fix language flaws, avoid design pattern copy-paste, make DSLs.
+You can even morph one language into another and use them together.
 
 
 TODO
@@ -54,9 +56,10 @@ TODO
 
 Lots of things, actually. Most urgent are:
 
-- rules priority
+- assoc/priority cleanup
 - file scope for rules
 - lexical scope for rules
+- some compiler
 - make it usable
 
 More distant ones:
