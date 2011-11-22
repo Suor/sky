@@ -106,6 +106,12 @@ var sky = {
         return this._start_rules_of[parent_rule_name];
     }
 };
+lang = sky.child(sky, {
+    rules: [],
+    rules_by_name: {},
+    _start_rules_of: {}
+});
+
 sky.define_rules(
     {name: "ident", terms: [/^[a-zA-Z][a-zA-Z0-9-]*/]},
 
@@ -115,8 +121,11 @@ sky.define_rules(
 
     {name: "regex-body", terms: [/^~([^~]+)~/]},
     {name: "regex-def",
-     terms: ["regex", {name: "name", rule: "ident"}, {name: "re", rule: "regex-body"}, ";"],
-     expand: function (matches) { sky.rules.push(matches) } },
+     terms: ["regex", {name: "name", rule: "ident"}, {name: "re", rule: "regex-body"}],
+     expand: function (matches) { lang.define_rule({
+         name: matches.name.expand(),
+         terms: [new RegExp('^(' + matches.re.expand() + ')')]
+     }) } },
     {name: "rule-maybe",
      terms: ["rule", {name: "name", rule: "ident"}, "maybe",
              {name: "rules", rule: "ident", collect: "array"},
@@ -158,10 +167,12 @@ sky.define_rules(
 "int-literal ident add-expr mul-expr".split(" ").forEach(function (rule) {
     sky.define_rules({name: "expr", terms: [{rule: rule}]});
 });
-sky.define_rules(sky.base_rule = {
-    name: "statement", terms: [{name: "expr", rule: "expr"}, ";"],
-    expand: function (matches) { return matches.expr + ";"; }
-});
+sky.define_rules(
+    {name: "statement", terms: [{name: "expr", rule: "expr"}, ";"],
+     expand: function (matches) { return matches.expr.expand() + ";"; }},
+    {name: "statement", terms: [{name: "def", rule: "rule-def"}, ";"]},
+    {name: "statement", terms: [{name: "def", rule: "regex-def"}, ";"]}
+);
 
 sky.assoc = {"add-expr": "left", "mul-expr": "left"};
 sky.priority = {"add-expr": 1, "mul-expr": 2};
@@ -177,15 +188,17 @@ sky.looser = function (rule) {
     });
 };
 
+sky.base_rule_name = "statement";
+
 
 function RuleState(rule) {
     return sky.child(RuleState.prototype, {
         rule: rule,
         pos: 0,
-        matched: []
+        matched: [],
+        matches: {}
     });
 }
-
 
 // TODO: rename rules to folds where appropriate
 
@@ -195,7 +208,7 @@ RuleState.prototype = {
         if (this.pos != this.rule.terms.length) {
             repr += ':' + this.pos
         }
-        repr += '(' + this.matched.join(',') + ')'
+        repr += '(' + this.matched.join(',') + ')';
         return repr;
     },
 
@@ -206,7 +219,11 @@ RuleState.prototype = {
     },
 
     moved: function(term) {
-        var child = this.child();
+        var child = this.child(),
+            term_def = child.rule.terms[child.pos];
+        
+        if (term_def.name)
+            child.matches[term_def.name] = term;
         child.pos += 1;
         child.matched.push(term)
         return child;
@@ -237,6 +254,18 @@ RuleState.prototype = {
             return null;
         }
     },
+
+    default_expand: function () {
+        return sky.map(this.matched, function (match) {
+            return typeof match === 'string' ? match : match.expand();
+        }).join(' ');
+    },
+    expand: function () {
+        console.log('expand', this.rule);
+        var exp = this.rule.expand ? this.rule.expand(this.matches) : this.default_expand();
+        console.log('to', exp);
+        return exp;
+    }
 };
 
 
@@ -301,7 +330,7 @@ State.prototype = {
             last_partial = this.parts[this.parts.length-1];
             next_term_rule = last_partial.rule.terms[last_partial.pos].rule;
         } else {
-            next_term_rule = sky.base_rule.name;
+            next_term_rule = sky.base_rule_name;
         }
         var expected_rule_names = sky.child(sky.start_rules_of(next_term_rule));
 
@@ -346,9 +375,11 @@ State.prototype = {
         var state = this,
             moved = [], with_full;
 
-        if (folded.rule === sky.base_rule && this.parts.length === 0) {
+        if (folded.rule.name === sky.base_rule_name && this.parts.length === 0) {
+            var expanded = folded.expand();
             with_full = this.child();
-            with_full.full.push(folded);
+            if (expanded)
+                with_full.full.push(expanded);
             moved.push(with_full);
         }
 
@@ -394,13 +425,13 @@ State.prototype = {
         return child;
     },
 
-    moved_by_term: function (value, rule, pos, partial, partial_index) {
+    moved_by_term: function (eat, value, rule, pos, partial, partial_index) {
         if (!partial) {
             partial = RuleState(rule);
         }
 
         var child = this.child();
-        child.eat(value);
+        child.eat(eat);
 
         return child.moved_by_partial(partial.moved(value), partial_index);
     },
@@ -410,12 +441,12 @@ State.prototype = {
 
         if (typeof term === "string") {
             if (this.next_is(term)) {
-                return this.moved_by_term(term, rule, pos, partial, partial_index);
+                return this.moved_by_term(term, term, rule, pos, partial, partial_index);
             }
         } else if (term instanceof RegExp) {
             var m = this.rest.match(term);
             if (m) {
-                return this.moved_by_term(m[1] || m[0], rule, pos, partial, partial_index);
+                return this.moved_by_term(m[0], m[2] || m[0], rule, pos, partial, partial_index);
             }
         }
     },
@@ -445,13 +476,23 @@ var send = {};
 });
 
 function morph(text) {
-    var states = [State(text)];
+    var states = [State(text)], prev = [];
 
     while (states.length) {
         console.log("");
+        prev = states;
         states = sky.flat_map(states, send.moved);
         out(states.map(send.toString));
     }
+    return prev[0];
 }
 
-morph('A + X * Y + B;');
+out(morph('\
+regex int-literal ~0|[1-9][0-9]+~;\
+regex ident ~[a-zA-Z][a-zA-Z0-9-]*~;\
+\
+rule add-expr ~ <left:expr> + <right:expr> ~ {\
+    return ~ (<left>) + (<right>) ~;\
+}\
+'));
+out(['rules', lang.rules]);

@@ -56,7 +56,7 @@ TODO
 
 Lots of things, actually. Most urgent are:
 
-- assoc/priority cleanup
+- support repeat in rules
 - file scope for rules
 - lexical scope for rules
 - some compiler
