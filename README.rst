@@ -68,3 +68,14 @@ More distant ones:
 - fix well-known language flaws
 - morph CoffeeScript into Javascript
 - enable in-browser usage
+
+Compiling strategies:
+
+- stay near the core, use target language types and their methods.
+- use wrappers for types, with custom behavior and methods.
+
+The first one is simpler and will result in faster code. Second permits new types,
+operator overloading and such and will probably require optimization. Also, since
+we wrap a lower level target makes sense. Some smart optimizations such as defining 
+what type is wrapped at compile time or generating several versions for different types 
+will be useful.
